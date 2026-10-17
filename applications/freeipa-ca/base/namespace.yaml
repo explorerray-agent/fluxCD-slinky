@@ -1,4 +1,5 @@
 ---
+# Owned here, not by applications/slurm: the Job writes into it first.
 apiVersion: v1
 kind: Namespace
 metadata:
