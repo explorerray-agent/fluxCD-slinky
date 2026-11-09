@@ -98,6 +98,19 @@ loginsets:
 #      `with`, which is why login sets are unaffected.)
 nodesets:
   slinky:
+    # One slurmd per schedulable Kubernetes node instead of a fixed replica
+    # count, so every variant gets one compute node per worker with no
+    # per-cluster number to keep in step with the inventory: kubeadm-single and
+    # kind-single get 1 (their only node is untainted), kubeadm-multi and
+    # kind-multi get one per worker. The operator honours node taints and
+    # affinity, so the NoSchedule control plane on the multi-node variants is
+    # skipped. `replicas` is ignored in this mode.
+    #
+    # Slurm NodeNames become the Kubernetes node hostnames (node2, kind-worker,
+    # ...) instead of slinky-0, slinky-1, ... A cluster switched in place keeps
+    # its old slinky-N records as DOWN nodes (pruneSlurmNodeRecords defaults to
+    # Never); remove them once with `scontrol delete nodename=<name>`.
+    scalingMode: DaemonSet
     # Same shared /home as the login pod (same fsGroup caveat).
     podSpec:
       volumes:
