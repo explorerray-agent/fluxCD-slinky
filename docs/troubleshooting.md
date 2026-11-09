@@ -32,6 +32,7 @@ use the index to jump straight to yours.
 | Identity and Slurm | [Reservation `users=` fails: `Unspecified error`](#scontrol-create-reservation-usersuser-fails-with-unspecified-error) |
 | Identity and Slurm | [`sbatch`: `Invalid account or account/partition combination`](#sbatch-or-srun-fails-with-invalid-account-or-accountpartition-combination-specified) |
 | Identity and Slurm | [`sacct` shows an empty `Account`](#jobs-complete-but-sacct-shows-an-empty-account) |
+| Identity and Slurm | [Old `slinky-0` still in `sinfo` after an upgrade](#sinfo-still-lists-an-old-slinky-0-node-after-an-upgrade) |
 | Generic traps | [A values change appears to do nothing](#a-values-change-appears-to-do-nothing) |
 | Generic traps | [ConfigMap/Secret change not visible in a pod](#a-configmap-or-secret-change-is-not-visible-inside-a-running-pod) |
 | Generic traps | [`sss_cache` not found](#sss_cache-is-not-found-when-trying-to-flush-the-sssd-cache-rocky-login-image) |
@@ -434,6 +435,38 @@ passed `-A <account>` then has that `Account` recorded, still with
 **Fix:** register the user (bootstrap step 3), e.g.
 `sacctmgr -i add user <user> account=<account>` from the login pod. With
 enforcement on, new jobs from unregistered users are refused instead.
+
+### `sinfo` still lists an old `slinky-0` node after an upgrade
+
+Seen once, on a cluster deployed before the compute NodeSet switched to
+`scalingMode: DaemonSet` (`applications/slurm/base/values.yaml`). After the
+upgrade, `sinfo -N` shows the real nodes, named after their Kubernetes nodes
+(`node2`, `node3`, `kind-worker`, ...), next to the old `slinky-0`, which is
+`drain` with `State=DOWN+DRAIN+DYNAMIC_NORM` and
+`Reason=slurm-operator: Pod is terminating`.
+
+**Cause:** a StatefulSet-mode NodeSet named its Slurm nodes `slinky-<ordinal>`;
+DaemonSet mode names them after the Kubernetes node they run on. The operator
+does not delete the old dynamic node record, because `pruneSlurmNodeRecords`
+defaults to `Never`. Jobs are unaffected, since the stale node accepts none,
+but it stays in `sinfo` until deleted. Fresh installs never have it.
+
+**Check:**
+
+```sh
+kubectl -n slurm exec slurm-controller-0 -c slurmctld -- sinfo -N
+kubectl -n slurm get pod -l app.kubernetes.io/component=worker -o wide
+```
+
+**Fix:** once the new worker pods are Running and `idle`, delete each old
+record once:
+
+```sh
+kubectl -n slurm exec slurm-controller-0 -c slurmctld -- scontrol delete nodename=slinky-0
+```
+
+slurmctld may log a few `_find_node_record: lookup failure for node
+"slinky-0"` lines right after the delete; they stop on their own.
 
 ## Generic traps
 
