@@ -1,0 +1,40 @@
+---
+# Host DNS vs cluster DNS on systemd-resolved nodes (the Debian 13 cloud image).
+#
+# Kubespray's default `resolvconf_mode: host_resolvconf` writes
+# /etc/systemd/resolved.conf.d/kubespray.conf, which makes the node's own DNS
+# server nodelocaldns (169.254.25.10), and it leaves kubelet's `resolvConf` at
+# /etc/resolv.conf -- under systemd-resolved that is the 127.0.0.53 stub.
+# coredns and nodelocaldns run with dnsPolicy Default, so their upstream is
+# whatever kubelet's resolvConf lists: the stub (loopback inside the pod), or,
+# via /run/systemd/resolve/resolv.conf, nodelocaldns itself. Either way the
+# query comes back to the cluster DNS and coredns exits with
+# `[FATAL] plugin/loop: Loop (127.0.0.1:NNNNN -> :53) detected`, on every node
+# it lands on (observed on kubeadm-single and on both kubeadm-multi workers).
+#
+# So, only on nodes whose /etc/resolv.conf is the systemd-resolved stub:
+#   - leave the host's resolver alone (resolvconf_mode: none), and
+#   - point kubelet at the real upstream list systemd-resolved maintains,
+#     /run/systemd/resolve/resolv.conf -- what Kubespray already does for
+#     Ubuntu and Fedora (roles/kubernetes/node/vars/), but not for Debian.
+# Other nodes (e.g. Rocky 10 with NetworkManager) evaluate to Kubespray's
+# defaults and are unchanged.
+#
+# Trade-off: on systemd-resolved nodes the HOST no longer resolves cluster.local
+# names (pods are unaffected; they use coredns via nodelocaldns as before).
+# Nothing in this repository needs host-side cluster DNS.
+#
+# Detection: /etc/resolv.conf naming systemd-resolved's stub (127.0.0.53),
+# from the `dns` facts Kubespray gathers in every run. Do NOT key this on
+# Kubespray's registered `systemd_resolved_enabled` instead: resolvconf_mode
+# gates the late kubernetes/preinstall pass in cluster.yml, whose skipped tasks
+# re-register that variable without `rc`, flipping resolvconf_mode back to
+# host_resolvconf mid-role -- the run then fails at "Set dns facts" ('dict
+# object' has no attribute 'rc'). Facts are not overwritten that way.
+systemd_resolved_stub: >-
+  {{ '127.0.0.53' in ((ansible_facts.dns | default({})).nameservers | default([])) }}
+resolvconf_mode: >-
+  {{ 'none' if systemd_resolved_stub | bool else 'host_resolvconf' }}
+kube_resolv_conf: >-
+  {{ '/run/systemd/resolve/resolv.conf' if systemd_resolved_stub | bool
+     else '/etc/resolv.conf' }}

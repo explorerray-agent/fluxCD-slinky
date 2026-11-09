@@ -104,12 +104,22 @@ as a prerequisite in
 
 ### coredns CrashLoopBackOff with `[FATAL] plugin/loop: Loop (127.0.0.1:NNNNN -> :53) detected for zone "."`
 
-On Debian/systemd-resolved hosts.
+On Debian/systemd-resolved hosts, on every node coredns lands on (both
+workers on kubeadm-multi).
 
 **Cause:** kubespray sets kubelet's `resolvConf` to `/etc/resolv.conf`,
 which under systemd-resolved is the 127.0.0.53 *stub resolver*, not a real
-upstream. coredns forwards to that stub, the stub forwards back to coredns,
-and the loop plugin detects it.
+upstream, and its `/etc/systemd/resolved.conf.d/kubespray.conf` makes the
+host's own DNS server nodelocaldns. coredns forwards to that stub, the stub
+forwards back to the cluster DNS, and the loop plugin detects it.
+
+`bootstrap/kubespray/inventory/group_vars/k8s_cluster/dns.yml` prevents this
+on a fresh `run.sh cluster`: on nodes whose `/etc/resolv.conf` is the
+systemd-resolved stub it sets `resolvconf_mode: none` and points kubelet at
+`/run/systemd/resolve/resolv.conf`. A cluster provisioned before that file
+existed still carries `kubespray.conf`, which `resolvconf_mode: none` does not
+remove — apply the fix below once (or delete `kubespray.conf` and re-run
+`run.sh cluster`).
 
 **Check:**
 
